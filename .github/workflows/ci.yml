@@ -1,0 +1,18 @@
+name: CI
+
+# Trigger: en cada push a cualquier rama, y en cada pull request
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest        # runner efímero x86 que GitHub presta
+    steps:
+      # 1. Traer el código al runner (sin esto, el runner está vacío)
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Verificar que la imagen Docker se construye sin errores
+      - name: Build Docker image
+        run: docker build -t tasks-api:ci .
