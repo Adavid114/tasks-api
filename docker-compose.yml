@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: tasks
+      POSTGRES_USER: tasks_app
+      POSTGRES_PASSWORD: taskspw
+    volumes:
+      - pgdata:/var/lib/postgresql/data                          # named volume: los datos persisten
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro   # bind mount RO: se ejecuta al init
+    healthcheck:                                                  # no arranques la api hasta que la db esté lista
+      test: ["CMD-SHELL", "pg_isready -U tasks_app -d tasks"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true                    # filesystem inmutable (≈ ProtectSystem=strict)
+    tmpfs:
+      - /tmp                           # excepción escribible en RAM (≈ ReadWritePaths)
+    security_opt:
+      - no-new-privileges:true         # ≈ NoNewPrivileges de Fase 1
+
+volumes:
+  pgdata:                           # declara el named volume
