@@ -36,7 +36,7 @@ app.use((req, res, next) => {
 });
 
 // --- Health check (used later by Nginx and monitoring) ---
-app.get("/health", (req, res) => res.json({ status: "ok" }));
+app.get("/health", (req, res) => res.json({ status: "healthy" }));
 
 // --- Auth: register ---
 app.post("/auth/register", async (req, res) => {
