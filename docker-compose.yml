@@ -2,9 +2,9 @@ services:
   db:
     image: postgres:16
     environment:
-      POSTGRES_DB: tasks
-      POSTGRES_USER: tasks_app
-      POSTGRES_PASSWORD: taskspw
+      POSTGRES_DB: ${PGDATABASE}
+      POSTGRES_USER: ${PGUSER}
+      POSTGRES_PASSWORD: ${PGPASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data                          # named volume: los datos persisten
       - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro   # bind mount RO: se ejecuta al init
