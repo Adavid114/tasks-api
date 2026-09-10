@@ -16,3 +16,4 @@ EXPOSE 3000
 USER node
 
 CMD ["node", "src/server.js"]
+ESTA_LINEA_NO_EXISTE_Y_ROMPE_EL_BUILD
