@@ -1,0 +1,22 @@
+server:
+  http_listen_port: 9080
+
+# A dónde ENVÍA los logs (push a Loki)
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+# De dónde LEE los logs y cómo los etiqueta
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:            # descubre contenedores Docker automáticamente
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # usa el nombre del contenedor como label (para filtrar por servicio en Grafana)
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      # descarta contenedores que NO empiecen por tasks-api
+      - source_labels: ['container']
+        regex: 'tasks-api.*'
+        action: keep          # 'keep' = quédate solo con los que matchean; 'drop' = descártalos

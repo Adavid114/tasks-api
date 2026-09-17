@@ -1,18 +1,56 @@
 name: CI
 
-# Trigger: en cada push a cualquier rama, y en cada pull request
 on:
   push:
   pull_request:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest        # runner efímero x86 que GitHub presta
+  test:
+    runs-on: ubuntu-latest
+
+    # Ephemeral Postgres for the tests — GitHub spins it up alongside the job,
+    # reachable at localhost:5432 from the runner, and destroys it after.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: tasks_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d tasks_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
     steps:
-      # 1. Traer el código al runner (sin esto, el runner está vacío)
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Verificar que la imagen Docker se construye sin errores
-      - name: Build Docker image
-        run: docker build -t tasks-api:ci .
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply DB schema
+        run: psql "$DATABASE_URL" -f schema.sql
+        env:
+          DATABASE_URL: postgresql://test:testpassword@localhost:5432/tasks_test
+
+      - name: Run tests
+        run: pnpm test
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: test
+          PGPASSWORD: testpassword
+          PGDATABASE: tasks_test
+          JWT_SECRET: test-secret

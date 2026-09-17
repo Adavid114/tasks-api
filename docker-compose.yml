@@ -3,28 +3,38 @@ services:
     image: postgres:16
     environment:
       POSTGRES_DB: ${PGDATABASE}
-      POSTGRES_USER: ${PGUSER}
-      POSTGRES_PASSWORD: ${PGPASSWORD}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGPASSWORD: ${PGPASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data                          # named volume: los datos persisten
-      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro   # bind mount RO: se ejecuta al init
+      - ./initdb:/docker-entrypoint-initdb.d:ro   # bind mount RO: se ejecuta al init
+    networks:
+      - backend
     healthcheck:                                                  # no arranques la api hasta que la db esté lista
-      test: ["CMD-SHELL", "pg_isready -U tasks_app -d tasks"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${PGDATABASE}"]
       interval: 5s
       timeout: 3s
       retries: 5
 
   api:
     build: .
+    mem_limit: 128m
     env_file: .env
     depends_on:
       db:
         condition: service_healthy
     read_only: true                    # filesystem inmutable (≈ ProtectSystem=strict)
     tmpfs:
-      - /tmp                           # excepción escribible en RAM (≈ ReadWritePaths)
+      - /tmp:size=64m                  # excepción escribible en RAM (≈ ReadWritePaths)
     security_opt:
       - no-new-privileges:true         # ≈ NoNewPrivileges de Fase 1
+    cap_drop:
+      - ALL
+    networks:
+      - frontend
+      - backend
+      - monitoring
 
   nginx:
     image: nginx:latest
@@ -32,8 +42,92 @@ services:
       - "80:80"                       # la ÚNICA puerta publica
     volumes:
       - ./nginx/tasks-api.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - frontend
     depends_on:
       - api
 
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - /:/host:ro,rslave          # host read-only para leer /proc, /sys
+    networks:
+      - monitoring
+    restart: unless-stopped
+    # sin ports: → solo Prometheus lo alcanza por la red monitoring
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus       # volumen para que las métricas persistan
+    ports:
+      - "127.0.0.1:9090:9090"        # UI de Prometheus, SOLO accesible desde el host (loopback)
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "127.0.0.1:3001:3000"      # UI de Grafana en loopback (3001 en el host para no chocar con tu api en 3000)
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}   # contraseña de admin desde .env
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    command:
+      - '--docker_only=true'        # solo contenedores Docker, ignora los cgroups de systemd
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+    # sin ports: → solo Prometheus lo alcanza
+
+  loki:
+    image: grafana/loki:latest
+    volumes:
+      - loki_data:/loki
+    networks:
+      - monitoring
+    restart: unless-stopped
+    # sin ports: → solo Grafana (para leer) y Promtail (para escribir) lo alcanzan por la red
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro   # los logs de los contenedores
+      - /var/run/docker.sock:/var/run/docker.sock:ro               # para descubrir contenedores/labels
+      - ./promtail/promtail.yml:/etc/promtail/config.yml:ro         # su config
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - loki
+
+networks:
+  frontend:
+  backend:
+    internal: true
+  monitoring:
+
 volumes:
-  pgdata:                           # declara el named volume
+  pgdata:
+  prom_data:
+  grafana_data:
+  loki_data:
