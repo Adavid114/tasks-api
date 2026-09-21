@@ -57,16 +57,20 @@ jobs:
 
   # ---------- BUILD + PUSH: build once, push by digest. Only from main. ----------
   build:
-    needs: ci                                # GATE: only if ci passed
+    needs: ci                                # Gate: only if ci passed
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write                        # push to GHCR
+      packages: write                        # Push to GHCR
     outputs:
-      digest: ${{ steps.push.outputs.digest }}   # expose the immutable digest
+      digest: ${{ steps.push.outputs.digest }}   # Immutable digest of the built image
+      image: ${{ steps.image.outputs.name }}     # Lowercase image name (registries require lowercase)
     steps:
       - uses: actions/checkout@v4
+      - name: Compute lowercase image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -79,7 +83,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
 
   # ---------- SCAN: clean job, pulls the published image BY DIGEST and scans it ----------
   scan:
@@ -88,7 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read                         # only READ to pull the image
+      packages: read                         # Only read, to pull the image
     steps:
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -99,12 +103,12 @@ jobs:
       - name: Image scan (Trivy) by digest
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
-          image-ref: ghcr.io/${{ github.repository }}@${{ needs.build.outputs.digest }}
+          image-ref: ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
 
-  # ---------- SIGN: keyless signature of the digest (only if scan passed) ----------
+  # ---------- SIGN: keyless signature of the digest (only if build and scan passed) ----------
   sign:
     needs: [build, scan]
     if: github.ref == 'refs/heads/main'
@@ -122,4 +126,4 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Sign the image by digest (keyless)
-        run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ needs.build.outputs.digest }}
+        run: cosign sign --yes ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
