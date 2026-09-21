@@ -37,6 +37,7 @@ jobs:
       - name: Enable pnpm
         run: corepack enable
 
+      # --- Security scans on source (fast, fail early) ---
       - name: Secret scan (gitleaks)
         uses: gitleaks/gitleaks-action@v2
         env:
@@ -48,6 +49,7 @@ jobs:
       - name: Dependency audit (production deps)
         run: pnpm audit --prod --audit-level=high
 
+      # --- Tests against the ephemeral Postgres ---
       - name: Apply DB schema
         run: psql "$DATABASE_URL" -f schema.sql
         env:
@@ -62,3 +64,15 @@ jobs:
           PGPASSWORD: testpassword
           PGDATABASE: tasks_test
           JWT_SECRET: test-secret
+
+      # --- Build the image and scan it (image / OS-level CVEs) ---
+      - name: Build image
+        run: docker build -t tasks-api:ci .
+
+      - name: Image scan (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: tasks-api:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
