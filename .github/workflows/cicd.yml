@@ -4,12 +4,15 @@ on:
   push:
   pull_request:
 
-# Top-level: read-only by default. Each job elevates only what it needs.
 permissions:
   contents: read
 
+env:
+  AWS_REGION: us-east-1
+  ECR_REPO: tasks-api
+
 jobs:
-  # ---------- CI: tests + code/deps scans. No registry keys. ----------
+  # ---------- CI: tests + code/deps scans. No cloud keys. ----------
   ci:
     runs-on: ubuntu-latest
     permissions:
@@ -55,75 +58,79 @@ jobs:
           PGDATABASE: tasks_test
           JWT_SECRET: test-secret
 
-  # ---------- BUILD + PUSH: build once, push by digest. Only from main. ----------
+  # ---------- BUILD + PUSH to ECR (by digest, via OIDC). Only from main. ----------
   build:
-    needs: ci                                # Gate: only if ci passed
+    needs: ci
     if: github.ref == 'refs/heads/main'
+    environment: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write                        # Push to GHCR
+      id-token: write              # OIDC
     outputs:
-      digest: ${{ steps.push.outputs.digest }}   # Immutable digest of the built image
-      image: ${{ steps.image.outputs.name }}     # Lowercase image name (registries require lowercase)
+      digest: ${{ steps.push.outputs.digest }}
+      registry: ${{ steps.ecr-login.outputs.registry }}
     steps:
       - uses: actions/checkout@v4
-      - name: Compute lowercase image name
-        id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          role-to-assume: arn:aws:iam::627118586529:role/github-ecr-push
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
       - name: Build and push by digest
         id: push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
 
-  # ---------- SCAN: clean job, pulls the published image BY DIGEST and scans it ----------
+  # ---------- SCAN: read-only job, pulls by digest and scans. ----------
   scan:
     needs: build
     if: github.ref == 'refs/heads/main'
+    environment: scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read                         # Only read, to pull the image
+      id-token: write              # OIDC (read-only role)
     steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - name: Configure AWS credentials (OIDC, read-only)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          role-to-assume: arn:aws:iam::627118586529:role/github-ecr-read
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
       - name: Image scan (Trivy) by digest
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
-          image-ref: ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
+          image-ref: ${{ needs.build.outputs.registry }}/${{ env.ECR_REPO }}@${{ needs.build.outputs.digest }}
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
 
-  # ---------- SIGN: keyless signature of the digest (only if build and scan passed) ----------
+  # ---------- SIGN: keyless signature of the digest (only if build and scan passed). ----------
   sign:
     needs: [build, scan]
     if: github.ref == 'refs/heads/main'
+    environment: sign
     runs-on: ubuntu-latest
     permissions:
-      packages: write
-      id-token: write                        # OIDC for keyless signing
+      contents: read
+      id-token: write              # OIDC (for both AWS role AND cosign keyless)
     steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::627118586529:role/github-ecr-push
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Sign the image by digest (keyless)
-        run: cosign sign --yes ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
+        run: cosign sign --yes ${{ needs.build.outputs.registry }}/${{ env.ECR_REPO }}@${{ needs.build.outputs.digest }}
