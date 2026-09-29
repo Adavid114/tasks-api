@@ -120,6 +120,8 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
+        env:
+          TRIVY_PLATFORM: linux/arm64
 
   # ---------- SIGN: keyless signature of the digest (only if build and scan passed). ----------
   sign:
