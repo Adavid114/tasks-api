@@ -1,2 +1,19 @@
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - esbuild@0.24.3
+  - vite@6.4.2
+  - vite@6.4.3
+  - vitest@3.2.6
+  - qs@6.15.4
+  - qs@6.16.0
+  - vitest@4.1.11
+  - '@vitest/mocker@4.1.11'
+  - source-map-js@1.2.2
+  - proxy-addr@2.0.8
+  - tinypool@2.1.1
+  - tinypool@2.1.2
+  - vite@6.4.4
+  - '@vitest/mocker@4.1.12'
+  - body-parser@1.20.9
+  - qs@6.16.1
