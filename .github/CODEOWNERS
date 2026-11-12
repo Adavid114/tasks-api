@@ -1,0 +1,3 @@
+# Changes to what runs in CI, and with which permissions, must be reviewed by the owner
+/.github/            @Adavid114
+/pnpm-workspace.yaml @Adavid114

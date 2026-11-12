@@ -3,6 +3,7 @@ name: CI/CD
 on:
   push:
   pull_request:
+  workflow_dispatch:      # manual "Run workflow" button in the Actions tab
 
 permissions:
   contents: read
@@ -79,6 +80,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::627118586529:role/github-ecr-push
           aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 900    # 15-minute credentials: shorter window if stolen
       - name: Login to Amazon ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
@@ -113,6 +115,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::627118586529:role/github-ecr-read
           aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 900    # 15-minute credentials: shorter window if stolen
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
       - name: Image scan (Trivy) by digest
@@ -140,6 +143,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::627118586529:role/github-ecr-push
           aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 900    # 15-minute credentials: shorter window if stolen
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
       - name: Install Cosign
