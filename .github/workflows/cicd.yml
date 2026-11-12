@@ -70,6 +70,7 @@ jobs:
     permissions:
       contents: read
       id-token: write              # OIDC
+      attestations: write          # record the build provenance attestation
     outputs:
       digest: ${{ steps.push.outputs.digest }}
       registry: ${{ steps.ecr-login.outputs.registry }}
@@ -99,6 +100,14 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
+
+      # SLSA build provenance for the exact pushed digest (keyless, Sigstore via OIDC)
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
 
   # ---------- SCAN: read-only job, pulls by digest and scans. ----------
   scan:
