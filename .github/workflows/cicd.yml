@@ -70,7 +70,6 @@ jobs:
     permissions:
       contents: read
       id-token: write              # OIDC
-      attestations: write          # record the build provenance attestation
     outputs:
       digest: ${{ steps.push.outputs.digest }}
       registry: ${{ steps.ecr-login.outputs.registry }}
@@ -101,14 +100,6 @@ jobs:
           push: true
           tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
 
-      # SLSA build provenance for the exact pushed digest (keyless, Sigstore via OIDC)
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-name: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPO }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
-
   # ---------- SCAN: read-only job, pulls by digest and scans. ----------
   scan:
     needs: build
@@ -137,25 +128,17 @@ jobs:
         env:
           TRIVY_PLATFORM: linux/arm64
 
-  # ---------- SIGN: keyless signature of the digest (only if build and scan passed). ----------
+  # ---------- SIGN: reusable workflow (sign.yml) signs and attests the digest,
+  # with an identity that build and scan cannot obtain. Only if build and scan passed. ----------
   sign:
     needs: [build, scan]
     if: github.ref == 'refs/heads/main'
-    environment: sign
-    runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write              # OIDC (for both AWS role AND cosign keyless)
-    steps:
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::627118586529:role/github-ecr-push
-          aws-region: ${{ env.AWS_REGION }}
-          role-duration-seconds: 900    # 15-minute credentials: shorter window if stolen
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
-      - name: Sign the image by digest (keyless)
-        run: cosign sign --yes ${{ needs.build.outputs.registry }}/${{ env.ECR_REPO }}@${{ needs.build.outputs.digest }}
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/sign.yml
+    with:
+      image: ${{ needs.build.outputs.registry }}/tasks-api
+      digest: ${{ needs.build.outputs.digest }}
+      aws-region: us-east-1
